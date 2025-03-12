@@ -244,7 +244,7 @@ func calNameNumber(name string) (int, string, error) {
 		}
 
 		total += n
-		dist += fmt.Sprintf("%v = %d ", a, n)
+		dist += fmt.Sprintf("%s = %d ", string(a), n)
 	}
 	return total, dist, nil
 }
