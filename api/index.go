@@ -90,7 +90,12 @@ func processMessage(event LineEvent) error {
 
 	// Extract the text and create echo response
 	text := event.Message.Text
-	response := fmt.Sprintf("You said: %s", text)
+	total, dist, err := calNameNumber(text)
+	if err != nil {
+		return err
+	}
+
+	response := fmt.Sprintf("ชื่อ %s\nผลรวม = %d\n%s", text, total, dist)
 
 	return replyMessage(event.ReplyToken, response)
 }

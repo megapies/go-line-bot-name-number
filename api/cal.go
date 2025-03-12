@@ -80,8 +80,19 @@ func getAlphabetNumber(a rune) (int, error) {
 	return number, nil
 }
 
-func CalNameNumber(name string) (int, string, error) {
+func calNameNumber(name string) (int, string, error) {
 	// Define Thai character to number mapping
 
-	return 0, "", nil
+	total := 0
+	dist := ""
+	for _, a := range name {
+		n, err := getAlphabetNumber(a)
+		if err != nil {
+			return 0, "", err
+		}
+
+		total += n
+		dist += fmt.Sprintf("%v = %d ", a, n)
+	}
+	return total, dist, nil
 }
