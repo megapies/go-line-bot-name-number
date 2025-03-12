@@ -1,3 +1,3 @@
 module natthapach.com/go-line-bot-name-number
 
-go 1.20.0
+go 1.23.0
