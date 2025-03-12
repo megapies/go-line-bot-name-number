@@ -1,12 +1,150 @@
 package handler
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 )
+
+type LineWebhookRequest struct {
+	Events []LineEvent `json:"events"`
+}
+
+type LineEvent struct {
+	Type       string      `json:"type"`
+	Message    LineMessage `json:"message"`
+	ReplyToken string      `json:"replyToken"`
+}
+
+type LineMessage struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type LineResponse struct {
+	ReplyToken string        `json:"replyToken"`
+	Messages   []LineMessage `json:"messages"`
+}
+
+func validateSignature(body []byte, signature string) bool {
+	channelSecret := os.Getenv("LINE_CHANNEL_SECRET")
+	if channelSecret == "" {
+		log.Println("LINE_CHANNEL_SECRET is not set")
+		return false
+	}
+
+	mac := hmac.New(sha256.New, []byte(channelSecret))
+	mac.Write(body)
+	expectedSignature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	return signature == expectedSignature
+}
+
+func replyMessage(replyToken, text string) error {
+	channelAccessToken := os.Getenv("LINE_CHANNEL_ACCESS_TOKEN")
+	if channelAccessToken == "" {
+		return fmt.Errorf("LINE_CHANNEL_ACCESS_TOKEN is not set")
+	}
+
+	response := LineResponse{
+		ReplyToken: replyToken,
+		Messages: []LineMessage{
+			{Type: "text", Text: text},
+		},
+	}
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.line.me/v2/bot/message/reply", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+channelAccessToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+func processMessage(event LineEvent) error {
+	// Only process text messages
+	if event.Message.Type != "text" {
+		return nil
+	}
+
+	// Extract the text and create echo response
+	text := event.Message.Text
+	response := fmt.Sprintf("You said: %s", text)
+
+	return replyMessage(event.ReplyToken, response)
+}
 
 func Handler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Request received", r.Method, r.URL.Path)
-	fmt.Fprintf(w, "<h1>Hello from Go!</h1>")
+
+	if r.Method == http.MethodGet {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+		return
+	}
+
+	// Only accept POST requests for webhook
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprintf(w, "Method not allowed")
+		return
+	}
+
+	// Read the request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Error reading body: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// Validate LINE signature
+	signature := r.Header.Get("X-Line-Signature")
+	if signature == "" || !validateSignature(body, signature) {
+		log.Println("Invalid signature")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	// Parse the webhook request
+	var webhookReq LineWebhookRequest
+	if err := json.Unmarshal(body, &webhookReq); err != nil {
+		log.Printf("Error parsing webhook request: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// Process each event
+	for _, event := range webhookReq.Events {
+		if event.Type == "message" {
+			log.Printf("Received message: %s", event.Message.Text)
+			if err := processMessage(event); err != nil {
+				log.Printf("Error processing message: %v", err)
+			}
+		}
+	}
+
+	// Return 200 OK to acknowledge receipt
+	w.WriteHeader(http.StatusOK)
 }

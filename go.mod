@@ -1,3 +1,3 @@
-module natthapach.com/go-line-bot-name-number
+module line-webhook
 
 go 1.23.0
